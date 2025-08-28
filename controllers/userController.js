@@ -2,7 +2,7 @@ const crypto = require('crypto'); // Built-in Node.js module
 const { validationResult } = require('express-validator');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const User = require('../models/user');
+const User = require('../models/User');
 const sendEmail = require('../utils/sendEmail'); // Import our email utility
 
 // Register a new user

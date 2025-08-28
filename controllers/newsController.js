@@ -1,5 +1,5 @@
 const News = require('../models/News');
-const User = require('../models/user'); // We need the User model for this
+const User = require('../models/User'); // We need the User model for this
 
 // Get all news (No changes here)
 const getAllNews = async (req, res) => {
