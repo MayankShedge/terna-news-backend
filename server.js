@@ -11,6 +11,8 @@ const cookieParser = require('cookie-parser'); // Import cookie-parser
 dotenv.config();
 const app = express();
 
+console.log('The FRONTEND_URL is:', process.env.FRONTEND_URL);
+
 // Connect to MongoDB
 connectDB();
 
