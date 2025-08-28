@@ -26,11 +26,18 @@ const createNews = async (req, res) => {
     const savedNews = await news.save(); // Save the news and store the result
 
     // --- START: New Email Notification Logic ---
-    // After saving, send notifications. This runs in the background.
-    // We don't use 'await' here so the admin gets a fast response.
+    // This runs in the background after the admin's request is fulfilled.
     try {
+      console.log('Attempting to send notification emails...');
+      
       // 1. Find all verified users
       const usersToNotify = await User.find({ isVerified: true });
+      
+      if (usersToNotify.length === 0) {
+        console.log('No verified users found to notify.');
+      } else {
+        console.log(`Found ${usersToNotify.length} verified users to notify.`);
+      }
       
       // 2. Create the email content
       const linkToSite = process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -50,15 +57,16 @@ const createNews = async (req, res) => {
           subject: `New Post in Terna News: ${savedNews.title}`,
           message,
         });
+        console.log(`Notification email sent to ${user.email}`);
       }
-      console.log('Notification emails sent successfully.');
+      console.log('Finished sending all notification emails.');
     } catch (emailError) {
-      // If emails fail, don't crash the server. Just log the error.
-      console.error('Could not send notification emails:', emailError);
+      // If emails fail, it won't crash the server. It will just log the error.
+      console.error('CRITICAL: Could not send notification emails. Error:', emailError);
     }
     // --- END: New Email Notification Logic ---
 
-    // Respond to the admin immediately
+    // Respond to the admin immediately so they don't have to wait for emails to send.
     res.status(201).json(savedNews);
 
   } catch (error) {
