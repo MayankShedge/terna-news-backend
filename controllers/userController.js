@@ -41,7 +41,7 @@ const registerUser = async (req, res) => {
     await user.save(); // Save user with the token
 
     // 2. Send the verification email
-    const verificationURL = `http://localhost:3000/verify-email/${verificationToken}`;
+    const verificationURL = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
     const message = `Welcome to Terna News! Please verify your email by clicking this link: ${verificationURL}`;
 
     await sendEmail({
