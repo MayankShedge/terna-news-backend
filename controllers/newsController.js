@@ -1,10 +1,9 @@
 const News = require('../models/News');
 const User = require('../models/User'); // We need the User model for this
+const sendEmail = require('../utils/sendEmail'); // And our email utility
 
-// Get all news (No changes here)
+// Get all news
 const getAllNews = async (req, res) => {
-  // This function is not in the provided code, but I'm assuming it exists.
-  // If not, you can add it back based on your previous versions.
   const { category } = req.query;
   try {
     let news;
@@ -19,20 +18,55 @@ const getAllNews = async (req, res) => {
   }
 };
 
-
-// Create new news (No changes here)
+// Create new news
 const createNews = async (req, res) => {
   const { title, description, category, source } = req.body; 
   try {
     const news = new News({ title, description, category, source });
-    await news.save();
-    res.status(201).json(news);
+    const savedNews = await news.save(); // Save the news and store the result
+
+    // --- START: New Email Notification Logic ---
+    // After saving, send notifications. This runs in the background.
+    // We don't use 'await' here so the admin gets a fast response.
+    try {
+      // 1. Find all verified users
+      const usersToNotify = await User.find({ isVerified: true });
+      
+      // 2. Create the email content
+      const linkToSite = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const message = `
+        A new article has been posted on Terna News:
+
+        Title: ${savedNews.title}
+        Category: ${savedNews.category}
+
+        Visit ${linkToSite} to read more.
+      `;
+
+      // 3. Loop and send email to each user
+      for (const user of usersToNotify) {
+        await sendEmail({
+          email: user.email,
+          subject: `New Post in Terna News: ${savedNews.title}`,
+          message,
+        });
+      }
+      console.log('Notification emails sent successfully.');
+    } catch (emailError) {
+      // If emails fail, don't crash the server. Just log the error.
+      console.error('Could not send notification emails:', emailError);
+    }
+    // --- END: New Email Notification Logic ---
+
+    // Respond to the admin immediately
+    res.status(201).json(savedNews);
+
   } catch (error) {
     res.status(400).json({ message: 'Error creating news' });
   }
 };
 
-// Rate a News Article (No changes here)
+// Rate a News Article
 const rateNewsArticle = async (req, res) => {
   const { rating } = req.body;
   const newsId = req.params.id;
@@ -66,58 +100,48 @@ const rateNewsArticle = async (req, res) => {
   }
 };
 
-
-// --- START: New Function for News Recommendations ---
+// Get News Recommendations
 const getRecommendedNews = async (req, res) => {
     try {
-        const currentUser = req.user; // Logged-in user from 'protect' middleware
-
-        // 1. Find articles the current user has rated highly (4 stars or more)
+        const currentUser = req.user;
         const highlyRatedNews = await News.find({ 'ratings.user': currentUser._id, 'ratings.rating': { $gte: 4 } });
         const highlyRatedNewsIds = highlyRatedNews.map(news => news._id);
 
         if (highlyRatedNewsIds.length === 0) {
-            // If the user hasn't rated anything highly, return top-rated news as a fallback
             const topNews = await News.find({}).sort({ averageRating: -1 }).limit(5);
             return res.json(topNews);
         }
 
-        // 2. Find "taste twins": other users who also rated these same articles highly
         const similarUsers = await News.aggregate([
-            { $match: { _id: { $in: highlyRatedNewsIds } } }, // Filter for the same highly-rated news
-            { $unwind: '$ratings' }, // Deconstruct the ratings array
-            { $match: { 'ratings.rating': { $gte: 4 }, 'ratings.user': { $ne: currentUser._id } } }, // Find high ratings from other users
-            { $group: { _id: '$ratings.user', sharedLikes: { $sum: 1 } } }, // Group by user and count shared likes
-            { $sort: { sharedLikes: -1 } }, // Sort to find the most similar users
-            { $limit: 10 } // Limit to the top 10 most similar users
+            { $match: { _id: { $in: highlyRatedNewsIds } } },
+            { $unwind: '$ratings' },
+            { $match: { 'ratings.rating': { $gte: 4 }, 'ratings.user': { $ne: currentUser._id } } },
+            { $group: { _id: '$ratings.user', sharedLikes: { $sum: 1 } } },
+            { $sort: { sharedLikes: -1 } },
+            { $limit: 10 }
         ]);
         const similarUserIds = similarUsers.map(user => user._id);
 
         if (similarUserIds.length === 0) {
-            // Fallback if no similar users are found
             const topNews = await News.find({}).sort({ averageRating: -1 }).limit(5);
             return res.json(topNews);
         }
 
-        // 3. Find articles that these similar users liked but the current user hasn't seen
         const recommendedNews = await News.aggregate([
-            { $match: { 'ratings.user': { $in: similarUserIds }, 'ratings.rating': { $gte: 4 } } }, // Articles liked by similar users
-            { $match: { 'ratings.user': { $ne: currentUser._id } } }, // Exclude articles the current user has already rated
-            { $sort: { averageRating: -1 } }, // Sort by the highest average rating
-            { $limit: 5 } // Return the top 5 recommendations
+            { $match: { 'ratings.user': { $in: similarUserIds }, 'ratings.rating': { $gte: 4 } } },
+            { $match: { 'ratings.user': { $ne: currentUser._id } } },
+            { $sort: { averageRating: -1 } },
+            { $limit: 5 }
         ]);
         
         res.json(recommendedNews);
-
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server Error while fetching recommendations' });
     }
 };
-// --- END: New Function ---
 
-
-// Update news (No changes here)
+// Update news
 const updateNews = async (req, res) => {
   const { id } = req.params;
   try {
@@ -128,7 +152,7 @@ const updateNews = async (req, res) => {
   }
 };
 
-// Delete news (No changes here)
+// Delete news
 const deleteNews = async (req, res) => {
   const { id } = req.params;
   try {
@@ -139,5 +163,4 @@ const deleteNews = async (req, res) => {
   }
 };
 
-// --- CHANGE: Add getRecommendedNews to exports ---
 module.exports = { getAllNews, createNews, updateNews, deleteNews, rateNewsArticle, getRecommendedNews };
