@@ -1,39 +1,25 @@
 const express = require('express');
-const News = require('../models/News');
 const router = express.Router();
 const { protect, admin } = require('../middleware/authMiddleware');
-// --- CHANGE 1: Import the new controller functions ---
+
 const { 
-  rateNewsArticle, 
-  getRecommendedNews // New function for recommendations
+  getAllNews,        
+  createNews,        
+  updateNews,        
+  deleteNews,        
+  rateNewsArticle,   
+  getRecommendedNews 
 } = require('../controllers/newsController');
 
+const { sendWeeklyNewsletter, cleanupUnverifiedUsers } = require('../jobs/cronJobs');
 
-// --- START: New Route for Recommendations ---
-// This route is protected, so only logged-in users can get recommendations.
 router.route('/recommendations').get(protect, getRecommendedNews);
-// --- END: New Route ---
 
+router.get('/', getAllNews);
 
-// This route remains public so everyone can see the news.
-router.get('/', async (req, res) => {
-  const { category } = req.query;
-  try {
-    let news;
-    if (category) {
-      news = await News.find({ category });
-    } else {
-      news = await News.find();
-    }
-    res.json(news);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// This route also remains public.
 router.get('/:id', async (req, res) => {
   try {
+    const News = require('../models/News');
     const newsItem = await News.findById(req.params.id);
     if (!newsItem) {
       return res.status(404).json({ message: 'News item not found' });
@@ -44,61 +30,29 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Create a new news item (ADMIN ONLY)
-router.post('/', protect, admin, async (req, res) => {
-  const { title, description, source, category } = req.body;
-  const newsItem = new News({
-    title,
-    description,
-    source,
-    category,
-  });
+router.post('/', protect, admin, createNews);
 
+router.post('/:id/rate', protect, rateNewsArticle);
+
+router.put('/:id', protect, admin, updateNews);
+
+router.delete('/:id', protect, admin, deleteNews);
+
+router.get('/cron/newsletter', async (req, res) => {
   try {
-    const savedNews = await newsItem.save();
-    res.status(201).json(savedNews);
+    await sendWeeklyNewsletter();
+    res.json({ success: true, message: 'Newsletter sent' });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// This route is protected, so only logged-in users can submit a rating.
-router.route('/:id/rate').post(protect, rateNewsArticle);
-
-
-// Update a news item by ID (ADMIN ONLY)
-router.put('/:id', protect, admin, async (req, res) => {
-  const { title, description, source, category } = req.body;
-
+router.get('/cron/cleanup', async (req, res) => {
   try {
-    const updatedNews = await News.findByIdAndUpdate(
-      req.params.id,
-      { title, description, source, category },
-      { new: true, runValidators: true }
-    );
-
-    if (!updatedNews) {
-      return res.status(404).json({ message: 'News item not found' });
-    }
-
-    res.json(updatedNews);
+    await cleanupUnverifiedUsers();
+    res.json({ success: true, message: 'Cleanup completed' });
   } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-});
-
-// Delete a news item by ID (ADMIN ONLY)
-router.delete('/:id', protect, admin, async (req, res) => {
-  try {
-    const deletedNews = await News.findByIdAndDelete(req.params.id);
-
-    if (!deletedNews) {
-      return res.status(404).json({ message: 'News item not found' });
-    }
-
-    res.json({ message: 'News item deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

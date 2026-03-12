@@ -19,7 +19,6 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
-  // --- START: New Fields for Email Verification ---
   isVerified: {
     type: Boolean,
     default: false,
@@ -27,20 +26,22 @@ const userSchema = new mongoose.Schema({
   verificationToken: {
     type: String,
   },
-  // --- END: New Fields for Email Verification ---
+  // NEW: Password Reset Fields
+  passwordResetToken: {
+    type: String,
+  },
+  passwordResetExpires: {
+    type: Date,
+  },
 });
 
-// Password encryption
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) {
-    return next(); // Use return to exit function early
+    return next();
   }
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
   next();
 });
 
-const User = mongoose.model('User', userSchema);
-
-// Check if the model is already compiled before defining it
 module.exports = mongoose.models.User || mongoose.model('User', userSchema);

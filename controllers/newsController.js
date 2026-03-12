@@ -1,8 +1,7 @@
 const News = require('../models/News');
-const User = require('../models/User'); // We need the User model for this
-const sendEmail = require('../utils/sendEmail'); // And our email utility
+const User = require('../models/User');
+const { sendNewArticleEmail } = require('../utils/sendEmail'); 
 
-// Get all news
 const getAllNews = async (req, res) => {
   const { category } = req.query;
   try {
@@ -18,55 +17,47 @@ const getAllNews = async (req, res) => {
   }
 };
 
-// Create new news
 const createNews = async (req, res) => {
   const { title, description, category, source } = req.body; 
   try {
     const news = new News({ title, description, category, source });
-    const savedNews = await news.save(); // Save the news and store the result
+    const savedNews = await news.save();
 
-    // --- START: New Email Notification Logic ---
-    // This runs in the background after the admin's request is fulfilled.
     try {
-      console.log('Attempting to send notification emails...');
+      console.log('📧 Sending notification emails...');
       
-      // 1. Find all verified users
       const usersToNotify = await User.find({ isVerified: true });
       
       if (usersToNotify.length === 0) {
-        console.log('No verified users found to notify.');
+        console.log('✅ No verified users to notify.');
       } else {
-        console.log(`Found ${usersToNotify.length} verified users to notify.`);
+        console.log(`📬 Notifying ${usersToNotify.length} verified users...`);
+        
+        const articleForEmail = {
+          _id: savedNews._id,
+          title: savedNews.title,
+          category: savedNews.category,
+          content: savedNews.description,
+          excerpt: savedNews.description.substring(0, 200),
+          createdAt: savedNews.createdAt,
+          author: 'Terna News Team' 
+        };
+        
+        for (const user of usersToNotify) {
+          try {
+            await sendNewArticleEmail(user.email, user.name, articleForEmail);
+            console.log(`✅ Sent to ${user.email}`);
+          } catch (emailError) {
+            console.error(`❌ Failed to send to ${user.email}:`, emailError.message);
+          }
+        }
+        
+        console.log('✅ Finished sending all notification emails.');
       }
-      
-      // 2. Create the email content
-      const linkToSite = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const message = `
-        A new article has been posted on Terna News:
-
-        Title: ${savedNews.title}
-        Category: ${savedNews.category}
-
-        Visit ${linkToSite} to read more.
-      `;
-
-      // 3. Loop and send email to each user
-      for (const user of usersToNotify) {
-        await sendEmail({
-          email: user.email,
-          subject: `New Post in Terna News: ${savedNews.title}`,
-          message,
-        });
-        console.log(`Notification email sent to ${user.email}`);
-      }
-      console.log('Finished sending all notification emails.');
     } catch (emailError) {
-      // If emails fail, it won't crash the server. It will just log the error.
-      console.error('CRITICAL: Could not send notification emails. Error:', emailError);
+      console.error('❌ Email notification error:', emailError);
     }
-    // --- END: New Email Notification Logic ---
 
-    // Respond to the admin immediately so they don't have to wait for emails to send.
     res.status(201).json(savedNews);
 
   } catch (error) {
@@ -74,7 +65,6 @@ const createNews = async (req, res) => {
   }
 };
 
-// Rate a News Article
 const rateNewsArticle = async (req, res) => {
   const { rating } = req.body;
   const newsId = req.params.id;
@@ -108,7 +98,6 @@ const rateNewsArticle = async (req, res) => {
   }
 };
 
-// Get News Recommendations
 const getRecommendedNews = async (req, res) => {
     try {
         const currentUser = req.user;
@@ -149,7 +138,6 @@ const getRecommendedNews = async (req, res) => {
     }
 };
 
-// Update news
 const updateNews = async (req, res) => {
   const { id } = req.params;
   try {
@@ -160,7 +148,6 @@ const updateNews = async (req, res) => {
   }
 };
 
-// Delete news
 const deleteNews = async (req, res) => {
   const { id } = req.params;
   try {

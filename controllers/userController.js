@@ -1,11 +1,15 @@
-const crypto = require('crypto'); // Built-in Node.js module
+const crypto = require('crypto');
 const { validationResult } = require('express-validator');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const sendEmail = require('../utils/sendEmail'); // Import our email utility
+const { 
+  sendEmail, 
+  sendWelcomeEmail, 
+  sendVerificationEmail,
+  sendPasswordResetEmail 
+} = require('../utils/sendEmail');
 
-// Register a new user
 const registerUser = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -25,8 +29,6 @@ const registerUser = async (req, res) => {
       isAdmin = true;
     }
     
-    // --- START: Email Verification Logic ---
-    // Create the user but don't log them in yet
     user = new User({
       name,
       email,
@@ -34,28 +36,21 @@ const registerUser = async (req, res) => {
       isAdmin,
     });
 
-    // 1. Generate a random verification token
     const verificationToken = crypto.randomBytes(32).toString('hex');
     user.verificationToken = verificationToken;
 
-    await user.save(); // Save user with the token
+    await user.save();
 
-    // 2. Send the verification email
-    const verificationURL = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
-    const message = `Welcome to Terna News! Please verify your email by clicking this link: ${verificationURL}`;
+    try {
+      await sendVerificationEmail(user.email, verificationToken);
+    } catch (emailError) {
+      console.error('Email sending failed:', emailError);
+    }
 
-    await sendEmail({
-      email: user.email,
-      subject: 'Terna News - Email Verification',
-      message,
-    });
-
-    // 3. Send a response telling the user to check their email
     res.status(201).json({
       success: true,
       message: 'Registration successful! Please check your email to verify your account.',
     });
-    // --- END: Email Verification Logic (Note: Auto-login is removed) ---
 
   } catch (error) {
     console.error(error.message);
@@ -63,7 +58,6 @@ const registerUser = async (req, res) => {
   }
 };
 
-// --- START: New Function to Verify Email ---
 const verifyEmail = async (req, res) => {
     try {
         const verificationToken = req.params.token;
@@ -74,19 +68,27 @@ const verifyEmail = async (req, res) => {
         }
 
         user.isVerified = true;
-        user.verificationToken = undefined; // Clear the token
+        user.verificationToken = undefined;
         await user.save();
 
-        res.status(200).json({ success: true, message: 'Email verified successfully! You can now log in.' });
+        // Send welcome email after verification
+        try {
+          await sendWelcomeEmail(user.email, user.name);
+        } catch (emailError) {
+          console.error('Welcome email failed:', emailError);
+        }
+
+        res.status(200).json({ 
+          success: true, 
+          message: 'Email verified successfully! Welcome email sent. You can now log in.' 
+        });
 
     } catch (error) {
         console.error(error.message);
         res.status(500).json({ message: 'Server error during email verification' });
     }
 };
-// --- END: New Function ---
 
-// Log in an existing user
 const loginUser = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -101,11 +103,9 @@ const loginUser = async (req, res) => {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
-    // --- START: New Check for Email Verification ---
     if (!user.isVerified) {
         return res.status(401).json({ message: 'Please verify your email before logging in.' });
     }
-    // --- END: New Check ---
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
@@ -114,7 +114,10 @@ const loginUser = async (req, res) => {
 
     const payload = {
       user: {
-        id: user.id, name: user.name, email: user.email, isAdmin: user.isAdmin,
+        id: user.id, 
+        name: user.name, 
+        email: user.email, 
+        isAdmin: user.isAdmin,
       },
     };
 
@@ -136,4 +139,83 @@ const loginUser = async (req, res) => {
   }
 };
 
-module.exports = { registerUser, loginUser, verifyEmail };
+const forgotPassword = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+    
+    if (!user) {
+      return res.json({ 
+        success: true, 
+        message: 'If that email exists, a password reset link has been sent.' 
+      });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    user.passwordResetToken = resetToken;
+    user.passwordResetExpires = Date.now() + 15 * 60 * 1000; 
+
+    await user.save({ validateBeforeSave: false });
+
+    try {
+      await sendPasswordResetEmail(user.email, resetToken);
+    } catch (emailError) {
+      console.error('Password reset email failed:', emailError);
+      user.passwordResetToken = undefined;
+      user.passwordResetExpires = undefined;
+      await user.save({ validateBeforeSave: false });
+      return res.status(500).json({ message: 'Error sending email. Please try again.' });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Password reset link sent to your email.' 
+    });
+
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  const { token } = req.params;
+  const { password } = req.body;
+
+  try {
+    const user = await User.findOne({
+      passwordResetToken: token,
+      passwordResetExpires: { $gt: Date.now() } 
+    });
+
+    if (!user) {
+      return res.status(400).json({ 
+        message: 'Password reset token is invalid or has expired.' 
+      });
+    }
+
+    user.password = password;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+
+    await user.save();
+
+    res.json({ 
+      success: true, 
+      message: 'Password reset successful! You can now log in with your new password.' 
+    });
+
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+module.exports = { 
+  registerUser, 
+  loginUser, 
+  verifyEmail, 
+  forgotPassword,  
+  resetPassword    
+};
