@@ -9,7 +9,7 @@ const sendBrevoEmail = async (to, subject, htmlContent, textContent) => {
         body: JSON.stringify({
             sender: {
                 name: 'Terna News',
-                email: 'shedgemayank0@gmail.com' // Your verified Brevo sender
+                email: 'mayankshedge07@gmail.com' 
             },
             to: [{ email: to }],
             subject: subject,
