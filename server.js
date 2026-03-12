@@ -14,7 +14,10 @@ console.log('The FRONTEND_URL is:', process.env.FRONTEND_URL);
 
 connectDB();
 
-app.use(cors());
+app.use(cors({
+  origin: "https://terna-news-frontend.vercel.app",
+  credentials: true
+}));
 app.use(express.json());
 app.use(cookieParser());
 
