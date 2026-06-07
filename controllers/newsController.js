@@ -1,6 +1,6 @@
 const News = require('../models/News');
 const User = require('../models/User');
-const { sendNewArticleEmail } = require('../utils/sendEmail'); 
+const { sendNewArticleEmail } = require('../utils/sendEmail');
 
 const getAllNews = async (req, res) => {
   const { category } = req.query;
@@ -17,22 +17,42 @@ const getAllNews = async (req, res) => {
   }
 };
 
+const getNewsById = async (req, res) => {
+  try {
+    // findByIdAndUpdate with $inc is atomic — no race condition
+    const news = await News.findByIdAndUpdate(
+      req.params.id,
+      { $inc: { views: 1 } },
+      { new: true } // return the updated doc (with incremented views)
+    );
+
+    if (!news) {
+      return res.status(404).json({ message: 'News article not found' });
+    }
+
+    res.json(news);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server Error' });
+  }
+};
+
 const createNews = async (req, res) => {
-  const { title, description, category, source } = req.body; 
+  const { title, description, category, source } = req.body;
   try {
     const news = new News({ title, description, category, source });
     const savedNews = await news.save();
 
     try {
       console.log('📧 Sending notification emails...');
-      
+
       const usersToNotify = await User.find({ isVerified: true });
-      
+
       if (usersToNotify.length === 0) {
         console.log('✅ No verified users to notify.');
       } else {
         console.log(`📬 Notifying ${usersToNotify.length} verified users...`);
-        
+
         const articleForEmail = {
           _id: savedNews._id,
           title: savedNews.title,
@@ -40,9 +60,9 @@ const createNews = async (req, res) => {
           content: savedNews.description,
           excerpt: savedNews.description.substring(0, 200),
           createdAt: savedNews.createdAt,
-          author: 'Terna News Team' 
+          author: 'Terna News Team',
         };
-        
+
         for (const user of usersToNotify) {
           try {
             await sendNewArticleEmail(user.email, user.name, articleForEmail);
@@ -51,7 +71,7 @@ const createNews = async (req, res) => {
             console.error(`❌ Failed to send to ${user.email}:`, emailError.message);
           }
         }
-        
+
         console.log('✅ Finished sending all notification emails.');
       }
     } catch (emailError) {
@@ -59,9 +79,57 @@ const createNews = async (req, res) => {
     }
 
     res.status(201).json(savedNews);
-
   } catch (error) {
     res.status(400).json({ message: 'Error creating news' });
+  }
+};
+
+const toggleBookmark = async (req, res) => {
+  try {
+    const newsId = req.params.id;
+    const userId = req.user._id;
+
+    // Make sure the article actually exists
+    const news = await News.findById(newsId);
+    if (!news) {
+      return res.status(404).json({ message: 'News article not found' });
+    }
+
+    const user = await User.findById(userId);
+
+    const alreadyBookmarked = user.bookmarks.some(
+      (id) => id.toString() === newsId.toString()
+    );
+
+    if (alreadyBookmarked) {
+      // Remove bookmark
+      user.bookmarks = user.bookmarks.filter(
+        (id) => id.toString() !== newsId.toString()
+      );
+      await user.save();
+      return res.json({ bookmarked: false, message: 'Bookmark removed' });
+    } else {
+      // Add bookmark
+      user.bookmarks.push(newsId);
+      await user.save();
+      return res.json({ bookmarked: true, message: 'Article bookmarked' });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server Error' });
+  }
+};
+
+const getBookmarks = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).populate('bookmarks');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(user.bookmarks);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server Error' });
   }
 };
 
@@ -99,43 +167,56 @@ const rateNewsArticle = async (req, res) => {
 };
 
 const getRecommendedNews = async (req, res) => {
-    try {
-        const currentUser = req.user;
-        const highlyRatedNews = await News.find({ 'ratings.user': currentUser._id, 'ratings.rating': { $gte: 4 } });
-        const highlyRatedNewsIds = highlyRatedNews.map(news => news._id);
+  try {
+    const currentUser = req.user;
+    const highlyRatedNews = await News.find({
+      'ratings.user': currentUser._id,
+      'ratings.rating': { $gte: 4 },
+    });
+    const highlyRatedNewsIds = highlyRatedNews.map((news) => news._id);
 
-        if (highlyRatedNewsIds.length === 0) {
-            const topNews = await News.find({}).sort({ averageRating: -1 }).limit(5);
-            return res.json(topNews);
-        }
-
-        const similarUsers = await News.aggregate([
-            { $match: { _id: { $in: highlyRatedNewsIds } } },
-            { $unwind: '$ratings' },
-            { $match: { 'ratings.rating': { $gte: 4 }, 'ratings.user': { $ne: currentUser._id } } },
-            { $group: { _id: '$ratings.user', sharedLikes: { $sum: 1 } } },
-            { $sort: { sharedLikes: -1 } },
-            { $limit: 10 }
-        ]);
-        const similarUserIds = similarUsers.map(user => user._id);
-
-        if (similarUserIds.length === 0) {
-            const topNews = await News.find({}).sort({ averageRating: -1 }).limit(5);
-            return res.json(topNews);
-        }
-
-        const recommendedNews = await News.aggregate([
-            { $match: { 'ratings.user': { $in: similarUserIds }, 'ratings.rating': { $gte: 4 } } },
-            { $match: { 'ratings.user': { $ne: currentUser._id } } },
-            { $sort: { averageRating: -1 } },
-            { $limit: 5 }
-        ]);
-        
-        res.json(recommendedNews);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error while fetching recommendations' });
+    if (highlyRatedNewsIds.length === 0) {
+      const topNews = await News.find({}).sort({ averageRating: -1 }).limit(5);
+      return res.json(topNews);
     }
+
+    const similarUsers = await News.aggregate([
+      { $match: { _id: { $in: highlyRatedNewsIds } } },
+      { $unwind: '$ratings' },
+      {
+        $match: {
+          'ratings.rating': { $gte: 4 },
+          'ratings.user': { $ne: currentUser._id },
+        },
+      },
+      { $group: { _id: '$ratings.user', sharedLikes: { $sum: 1 } } },
+      { $sort: { sharedLikes: -1 } },
+      { $limit: 10 },
+    ]);
+    const similarUserIds = similarUsers.map((user) => user._id);
+
+    if (similarUserIds.length === 0) {
+      const topNews = await News.find({}).sort({ averageRating: -1 }).limit(5);
+      return res.json(topNews);
+    }
+
+    const recommendedNews = await News.aggregate([
+      {
+        $match: {
+          'ratings.user': { $in: similarUserIds },
+          'ratings.rating': { $gte: 4 },
+        },
+      },
+      { $match: { 'ratings.user': { $ne: currentUser._id } } },
+      { $sort: { averageRating: -1 } },
+      { $limit: 5 },
+    ]);
+
+    res.json(recommendedNews);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server Error while fetching recommendations' });
+  }
 };
 
 const updateNews = async (req, res) => {
@@ -158,4 +239,14 @@ const deleteNews = async (req, res) => {
   }
 };
 
-module.exports = { getAllNews, createNews, updateNews, deleteNews, rateNewsArticle, getRecommendedNews };
+module.exports = {
+  getAllNews,
+  getNewsById,
+  createNews,
+  updateNews,
+  deleteNews,
+  rateNewsArticle,
+  getRecommendedNews,
+  toggleBookmark,
+  getBookmarks,
+};

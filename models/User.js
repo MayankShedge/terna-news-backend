@@ -26,16 +26,21 @@ const userSchema = new mongoose.Schema({
   verificationToken: {
     type: String,
   },
-  // NEW: Password Reset Fields
   passwordResetToken: {
     type: String,
   },
   passwordResetExpires: {
     type: Date,
   },
+  bookmarks: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'News',
+    },
+  ],
 });
 
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
     return next();
   }

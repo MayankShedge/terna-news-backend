@@ -2,43 +2,25 @@ const express = require('express');
 const router = express.Router();
 const { protect, admin } = require('../middleware/authMiddleware');
 
-const { 
-  getAllNews,        
-  createNews,        
-  updateNews,        
-  deleteNews,        
-  rateNewsArticle,   
-  getRecommendedNews 
+const {
+  getAllNews,
+  getNewsById,
+  createNews,
+  updateNews,
+  deleteNews,
+  rateNewsArticle,
+  getRecommendedNews,
+  toggleBookmark,
+  getBookmarks,
 } = require('../controllers/newsController');
 
 const { sendWeeklyNewsletter, cleanupUnverifiedUsers } = require('../jobs/cronJobs');
 
-router.route('/recommendations').get(protect, getRecommendedNews);
+router.get('/recommendations', protect, getRecommendedNews);
 
-router.get('/', getAllNews);
+router.get('/bookmarks/me', protect, getBookmarks);
 
-router.get('/:id', async (req, res) => {
-  try {
-    const News = require('../models/News');
-    const newsItem = await News.findById(req.params.id);
-    if (!newsItem) {
-      return res.status(404).json({ message: 'News item not found' });
-    }
-    res.json(newsItem);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-router.post('/', protect, admin, createNews);
-
-router.post('/:id/rate', protect, rateNewsArticle);
-
-router.put('/:id', protect, admin, updateNews);
-
-router.delete('/:id', protect, admin, deleteNews);
-
-router.get('/cron/newsletter', async (req, res) => {
+router.get('/cron/newsletter', protect, admin, async (req, res) => {
   try {
     await sendWeeklyNewsletter();
     res.json({ success: true, message: 'Newsletter sent' });
@@ -47,7 +29,7 @@ router.get('/cron/newsletter', async (req, res) => {
   }
 });
 
-router.get('/cron/cleanup', async (req, res) => {
+router.get('/cron/cleanup', protect, admin, async (req, res) => {
   try {
     await cleanupUnverifiedUsers();
     res.json({ success: true, message: 'Cleanup completed' });
@@ -55,5 +37,17 @@ router.get('/cron/cleanup', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+router.route('/').get(getAllNews).post(protect, admin, createNews);
+
+router
+  .route('/:id')
+  .get(getNewsById)
+  .put(protect, admin, updateNews)
+  .delete(protect, admin, deleteNews);
+
+router.post('/:id/rate', protect, rateNewsArticle);
+
+router.post('/:id/bookmark', protect, toggleBookmark);
 
 module.exports = router;

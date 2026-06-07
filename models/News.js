@@ -1,14 +1,11 @@
-// Mongoose model for news articles.
-
 const mongoose = require('mongoose');
 
-// New sub-schema for individual ratings
 const ratingSchema = mongoose.Schema(
   {
     user: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
-      ref: 'User', // Reference to the User model
+      ref: 'User',
     },
     rating: {
       type: Number,
@@ -43,8 +40,7 @@ const newsSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
-    // --- START: New Fields for Ratings ---
-    ratings: [ratingSchema], // An array of rating objects
+    ratings: [ratingSchema],
     numReviews: {
       type: Number,
       required: true,
@@ -55,7 +51,10 @@ const newsSchema = new mongoose.Schema(
       required: true,
       default: 0,
     },
-    // --- END: New Fields for Ratings ---
+    views: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );
