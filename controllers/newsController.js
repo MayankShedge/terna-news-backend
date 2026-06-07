@@ -4,32 +4,49 @@ const { sendNewArticleEmail } = require('../utils/sendEmail');
 
 const getAllNews = async (req, res) => {
   const { category } = req.query;
+
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+  const skip = (page - 1) * limit;
+
   try {
-    let news;
-    if (category) {
-      news = await News.find({ category });
-    } else {
-      news = await News.find();
-    }
-    res.json(news);
+    const filter = category ? { category } : {};
+
+    const [total, news] = await Promise.all([
+      News.countDocuments(filter),
+      News.find(filter)
+        .sort({ createdAt: -1 }) 
+        .skip(skip)
+        .limit(limit),
+    ]);
+
+    res.json({
+      news,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1,
+      },
+    });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: 'Server Error' });
   }
 };
 
 const getNewsById = async (req, res) => {
   try {
-    // findByIdAndUpdate with $inc is atomic — no race condition
     const news = await News.findByIdAndUpdate(
       req.params.id,
       { $inc: { views: 1 } },
-      { new: true } // return the updated doc (with incremented views)
+      { new: true }
     );
-
     if (!news) {
       return res.status(404).json({ message: 'News article not found' });
     }
-
     res.json(news);
   } catch (error) {
     console.error(error);
@@ -45,14 +62,11 @@ const createNews = async (req, res) => {
 
     try {
       console.log('📧 Sending notification emails...');
-
       const usersToNotify = await User.find({ isVerified: true });
-
       if (usersToNotify.length === 0) {
         console.log('✅ No verified users to notify.');
       } else {
         console.log(`📬 Notifying ${usersToNotify.length} verified users...`);
-
         const articleForEmail = {
           _id: savedNews._id,
           title: savedNews.title,
@@ -62,7 +76,6 @@ const createNews = async (req, res) => {
           createdAt: savedNews.createdAt,
           author: 'Terna News Team',
         };
-
         for (const user of usersToNotify) {
           try {
             await sendNewArticleEmail(user.email, user.name, articleForEmail);
@@ -71,7 +84,6 @@ const createNews = async (req, res) => {
             console.error(`❌ Failed to send to ${user.email}:`, emailError.message);
           }
         }
-
         console.log('✅ Finished sending all notification emails.');
       }
     } catch (emailError) {
@@ -89,27 +101,23 @@ const toggleBookmark = async (req, res) => {
     const newsId = req.params.id;
     const userId = req.user._id;
 
-    // Make sure the article actually exists
     const news = await News.findById(newsId);
     if (!news) {
       return res.status(404).json({ message: 'News article not found' });
     }
 
     const user = await User.findById(userId);
-
     const alreadyBookmarked = user.bookmarks.some(
       (id) => id.toString() === newsId.toString()
     );
 
     if (alreadyBookmarked) {
-      // Remove bookmark
       user.bookmarks = user.bookmarks.filter(
         (id) => id.toString() !== newsId.toString()
       );
       await user.save();
       return res.json({ bookmarked: false, message: 'Bookmark removed' });
     } else {
-      // Add bookmark
       user.bookmarks.push(newsId);
       await user.save();
       return res.json({ bookmarked: true, message: 'Article bookmarked' });
@@ -136,7 +144,6 @@ const getBookmarks = async (req, res) => {
 const rateNewsArticle = async (req, res) => {
   const { rating } = req.body;
   const newsId = req.params.id;
-
   try {
     const news = await News.findById(newsId);
     if (news) {
@@ -146,15 +153,11 @@ const rateNewsArticle = async (req, res) => {
       if (alreadyRated) {
         return res.status(400).json({ message: 'You have already rated this article.' });
       }
-      const newRating = {
-        rating: Number(rating),
-        user: req.user._id,
-      };
+      const newRating = { rating: Number(rating), user: req.user._id };
       news.ratings.push(newRating);
       news.numReviews = news.ratings.length;
       news.averageRating =
-        news.ratings.reduce((acc, item) => item.rating + acc, 0) /
-        news.ratings.length;
+        news.ratings.reduce((acc, item) => item.rating + acc, 0) / news.ratings.length;
       await news.save();
       res.status(201).json({ message: 'Rating added successfully' });
     } else {
@@ -183,12 +186,7 @@ const getRecommendedNews = async (req, res) => {
     const similarUsers = await News.aggregate([
       { $match: { _id: { $in: highlyRatedNewsIds } } },
       { $unwind: '$ratings' },
-      {
-        $match: {
-          'ratings.rating': { $gte: 4 },
-          'ratings.user': { $ne: currentUser._id },
-        },
-      },
+      { $match: { 'ratings.rating': { $gte: 4 }, 'ratings.user': { $ne: currentUser._id } } },
       { $group: { _id: '$ratings.user', sharedLikes: { $sum: 1 } } },
       { $sort: { sharedLikes: -1 } },
       { $limit: 10 },
@@ -201,12 +199,7 @@ const getRecommendedNews = async (req, res) => {
     }
 
     const recommendedNews = await News.aggregate([
-      {
-        $match: {
-          'ratings.user': { $in: similarUserIds },
-          'ratings.rating': { $gte: 4 },
-        },
-      },
+      { $match: { 'ratings.user': { $in: similarUserIds }, 'ratings.rating': { $gte: 4 } } },
       { $match: { 'ratings.user': { $ne: currentUser._id } } },
       { $sort: { averageRating: -1 } },
       { $limit: 5 },

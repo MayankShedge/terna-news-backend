@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const rateLimit = require('express-rate-limit');
 const connectDB = require('./config/db');
 const newsRoutes = require('./routes/newsRoutes');
 const userRoutes = require('./routes/userRoutes');
@@ -20,6 +21,33 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(cookieParser());
+
+
+// Rate Limiting
+// Global limiter — applies to every route
+// 100 requests per 15 minutes per IP — generous enough for normal browsing
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, 
+  max: 100,
+  standardHeaders: true,  
+  legacyHeaders: false,
+  message: { message: 'Too many requests, please try again later.' },
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many attempts, please try again after 15 minutes.' },
+});
+
+app.use(globalLimiter); 
+
+app.use('/api/users/login', authLimiter);
+app.use('/api/users/register', authLimiter);
+app.use('/api/users/forgot-password', authLimiter);
+
 
 app.use('/api/news', newsRoutes);
 app.use('/api/users', userRoutes);
